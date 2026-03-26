@@ -2,6 +2,8 @@ import { useState } from "react";
 import { DEFAULT_WORD_BANK } from "../data/wordBank";
 import { mergeWordBank, applyWordFilters } from "../utils/gameLogic";
 
+const DEFAULT_CAT_SET = new Set(Object.keys(DEFAULT_WORD_BANK));
+
 export default function SetupScreen({ onStart, onBack, savedConfig, customWords }) {
   const [playerCount, setPlayerCount] = useState(savedConfig?.names?.length || 4);
   const [names, setNames] = useState(savedConfig?.names || ["", "", "", ""]);
@@ -21,6 +23,18 @@ export default function SetupScreen({ onStart, onBack, savedConfig, customWords 
   const [expandedCat, setExpandedCat] = useState(null);
   // Panel de palabras colapsado por defecto
   const [wordsPanelOpen, setWordsPanelOpen] = useState(false);
+  // Filtro de origen: "ambas" | "predefinidas" | "mias"
+  const [sourceMode, setSourceMode] = useState("ambas");
+
+  const hasCustomCats = allCats.some(cat => !DEFAULT_CAT_SET.has(cat));
+
+  const visibleCats = sourceMode === "predefinidas"
+    ? allCats.filter(cat => DEFAULT_CAT_SET.has(cat))
+    : sourceMode === "mias"
+    ? allCats.filter(cat => !DEFAULT_CAT_SET.has(cat))
+    : allCats;
+
+  const effectiveCats = new Set(visibleCats.filter(cat => activeCats.has(cat)));
 
   const updateCount = (val) => {
     const n = Math.max(3, Math.min(12, val));
@@ -55,9 +69,9 @@ export default function SetupScreen({ onStart, onBack, savedConfig, customWords 
     });
   };
 
-  // Conteo de palabras activas total
-  const totalActive = allCats.reduce((sum, cat) => {
-    if (!activeCats.has(cat)) return sum;
+  // Conteo de palabras activas según categorías visibles y activas
+  const totalActive = visibleCats.reduce((sum, cat) => {
+    if (!effectiveCats.has(cat)) return sum;
     return sum + fullBank[cat].filter(w => !disabledWords.has(`${cat}::${w.word}`)).length;
   }, 0);
 
@@ -66,7 +80,7 @@ export default function SetupScreen({ onStart, onBack, savedConfig, customWords 
 
   const handleStart = () => {
     if (!canStart) return;
-    const wordBank = applyWordFilters(fullBank, activeCats, disabledWords);
+    const wordBank = applyWordFilters(fullBank, effectiveCats, disabledWords);
     onStart({ names: names.map(n => n.trim()), impostorCount, impostorSeesTheme, impostorSeesHint, wordBank });
   };
 
@@ -134,7 +148,7 @@ export default function SetupScreen({ onStart, onBack, savedConfig, customWords 
               <span className="words-panel-icon">🗂️</span>
               <div>
                 <span className="words-panel-title">Palabras a usar</span>
-                <span className="words-panel-sub">{totalActive} palabras · {activeCats.size} categoría{activeCats.size !== 1 ? "s" : ""}</span>
+                <span className="words-panel-sub">{totalActive} palabras · {effectiveCats.size} categoría{effectiveCats.size !== 1 ? "s" : ""}</span>
               </div>
             </div>
             <span className="words-panel-chevron">{wordsPanelOpen ? "▲" : "▼"}</span>
@@ -142,7 +156,15 @@ export default function SetupScreen({ onStart, onBack, savedConfig, customWords 
 
           {wordsPanelOpen && (
             <div className="cats-sel-list">
-              {allCats.map(cat => {
+              <div className="source-mode-row">
+                <button className={`source-mode-btn ${sourceMode === "ambas" ? "active" : ""}`} onClick={() => setSourceMode("ambas")}>Ambas</button>
+                <button className={`source-mode-btn ${sourceMode === "predefinidas" ? "active" : ""}`} onClick={() => setSourceMode("predefinidas")}>Predefinidas</button>
+                <button className={`source-mode-btn ${sourceMode === "mias" ? "active" : ""} ${!hasCustomCats ? "disabled" : ""}`} disabled={!hasCustomCats} onClick={() => setSourceMode("mias")}>Mis categorías</button>
+              </div>
+              {visibleCats.length === 0 && (
+                <p className="source-empty">No tienes categorías propias aún. Añade palabras desde "Mis Palabras".</p>
+              )}
+              {visibleCats.map(cat => {
                 const isActive = activeCats.has(cat);
                 const wordsInCat = fullBank[cat];
                 const activeCount = wordsInCat.filter(w => !disabledWords.has(`${cat}::${w.word}`)).length;

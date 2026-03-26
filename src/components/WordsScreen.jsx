@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DEFAULT_WORD_BANK } from "../data/wordBank";
+import { db } from "../firebase";
+import { collection, onSnapshot, doc, setDoc, deleteDoc, addDoc } from "firebase/firestore";
 
-export default function WordsScreen({ customWords, onSave, onBack }) {
+export default function WordsScreen({ customWords, onSave, onBack, user }) {
   const [words, setWords] = useState(customWords);
-  const [view, setView] = useState("list"); // list | add | edit
+  const [view, setView] = useState("list");
   const [editIndex, setEditIndex] = useState(null);
   const [filterCat, setFilterCat] = useState("Todas");
   const [formWord, setFormWord] = useState("");
@@ -12,9 +14,20 @@ export default function WordsScreen({ customWords, onSave, onBack }) {
   const [formNewCat, setFormNewCat] = useState("");
   const [useNewCat, setUseNewCat] = useState(false);
 
+  // Si hay usuario, escucha sus palabras en Firestore
+  useEffect(() => {
+    if (!user) return;
+    const ref = collection(db, "users", user.uid, "words");
+    const unsub = onSnapshot(ref, (snap) => {
+      const loaded = snap.docs.map(d => ({ ...d.data(), firestoreId: d.id }));
+      setWords(loaded);
+    });
+    return () => unsub();
+  }, [user]);
+
   const allDefaultCats = Object.keys(DEFAULT_WORD_BANK);
-  const allCustomCats = [...new Set(words.map(w => w.category))];
-  const allCats = [...new Set([...allDefaultCats, ...allCustomCats])];
+  const allCustomCats = [...new Set(words.map(w => w.category))].filter(c => !allDefaultCats.includes(c));
+  const allCats = [...allCustomCats, ...allDefaultCats];
 
   const resetForm = () => { setFormWord(""); setFormHint(""); setFormCat(""); setFormNewCat(""); setUseNewCat(false); };
 
@@ -25,18 +38,35 @@ export default function WordsScreen({ customWords, onSave, onBack }) {
     setFormCat(e.category); setFormNewCat(""); setUseNewCat(false);
     setView("edit");
   };
-  const handleDelete = (i) => {
-    const next = words.filter((_, idx) => idx !== i);
-    setWords(next); onSave(next);
+
+  const handleDelete = async (i) => {
+    if (user && words[i]?.firestoreId) {
+      await deleteDoc(doc(db, "users", user.uid, "words", words[i].firestoreId));
+    } else {
+      const next = words.filter((_, idx) => idx !== i);
+      setWords(next); onSave(next);
+    }
   };
-  const handleSave = () => {
+
+  const handleSave = async () => {
     const cat = useNewCat ? formNewCat.trim() : formCat;
     if (!formWord.trim() || !formHint.trim() || !cat) return;
     const entry = { word: formWord.trim(), hint: formHint.trim(), category: cat };
-    const next = view === "edit"
-      ? words.map((w, i) => i === editIndex ? entry : w)
-      : [...words, entry];
-    setWords(next); onSave(next); setView("list"); resetForm();
+
+    if (user) {
+      const ref = collection(db, "users", user.uid, "words");
+      if (view === "edit" && words[editIndex]?.firestoreId) {
+        await setDoc(doc(ref, words[editIndex].firestoreId), entry);
+      } else {
+        await addDoc(ref, entry);
+      }
+    } else {
+      const next = view === "edit"
+        ? words.map((w, i) => i === editIndex ? entry : w)
+        : [...words, entry];
+      setWords(next); onSave(next);
+    }
+    setView("list"); resetForm();
   };
 
   const filteredWords = filterCat === "Todas" ? words : words.filter(w => w.category === filterCat);
@@ -50,9 +80,14 @@ export default function WordsScreen({ customWords, onSave, onBack }) {
         <button className="add-word-btn" onClick={openAdd}>+ Añadir</button>
       </div>
       <div className="words-content">
-        {allCustomCats.length > 0 && (
+        {!user && (
+          <div className="words-cloud-notice">
+            🔑 Inicia sesión para guardar tus palabras en la nube
+          </div>
+        )}
+        {words.length > 0 && (
           <div className="cat-filter-scroll">
-            {["Todas", ...allCustomCats].map(cat => (
+            {["Todas", ...new Set(words.map(w => w.category))].map(cat => (
               <button key={cat} className={`cat-chip ${filterCat === cat ? "active" : ""}`} onClick={() => setFilterCat(cat)}>{cat}</button>
             ))}
           </div>
@@ -124,9 +159,11 @@ export default function WordsScreen({ customWords, onSave, onBack }) {
               </div>
             )}
           </div>
-          <button className={`start-btn ${!formValid ? "disabled" : ""}`} disabled={!formValid} onClick={handleSave}>
-            {view === "edit" ? "💾 Guardar cambios" : "✅ Añadir palabra"}
-          </button>
+          <div className="start-sticky">
+            <button className={`start-btn ${!formValid ? "disabled" : ""}`} disabled={!formValid} onClick={handleSave}>
+              {view === "edit" ? "💾 Guardar cambios" : "✅ Añadir palabra"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

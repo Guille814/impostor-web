@@ -10,12 +10,22 @@ export function pickRandom(arr) {
 
 export function mergeWordBank(customWords) {
   const merged = {};
+  // Primero las categorías custom-only (las que no existen en el banco por defecto)
+  for (const entry of customWords) {
+    if (!DEFAULT_WORD_BANK[entry.category]) {
+      if (!merged[entry.category]) merged[entry.category] = [];
+      merged[entry.category].push({ word: entry.word, hint: entry.hint });
+    }
+  }
+  // Luego las categorías predefinidas
   for (const [cat, words] of Object.entries(DEFAULT_WORD_BANK)) {
     merged[cat] = [...words];
   }
+  // Añadir palabras custom a categorías predefinidas existentes
   for (const entry of customWords) {
-    if (!merged[entry.category]) merged[entry.category] = [];
-    merged[entry.category].push({ word: entry.word, hint: entry.hint });
+    if (DEFAULT_WORD_BANK[entry.category]) {
+      merged[entry.category].push({ word: entry.word, hint: entry.hint });
+    }
   }
   return merged;
 }

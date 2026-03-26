@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { buildPlayers } from "./utils/gameLogic";
 import { useAuth } from "./hooks/useAuth";
+import { db } from "./firebase";
+import { collection, onSnapshot } from "firebase/firestore";
 import MainMenu from "./components/MainMenu";
 import SetupScreen from "./components/SetupScreen";
 import CardsScreen from "./components/CardsScreen";
@@ -23,7 +25,20 @@ export default function App() {
     return <JoinSessionScreen code={joinMatch[1].toUpperCase()} />;
   }
 
-  // Cargando sesión de auth
+  // Carga palabras desde Firestore si hay usuario logueado
+  useEffect(() => {
+    if (!user) {
+      setCustomWords([]);
+      return;
+    }
+    const ref = collection(db, "users", user.uid, "words");
+    const unsub = onSnapshot(ref, (snap) => {
+      const loaded = snap.docs.map(d => ({ ...d.data(), firestoreId: d.id }));
+      setCustomWords(loaded);
+    });
+    return () => unsub();
+  }, [user]);
+
   if (user === undefined) return (
     <div className="screen menu-screen">
       <p style={{ color: "var(--muted)" }}>Cargando…</p>
