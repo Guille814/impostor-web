@@ -17,7 +17,7 @@ export function getMostVoted(votes) {
   for (const [id, c] of Object.entries(count)) {
     if (c > max) { max = c; winner = id; }
   }
-  return winner; // null si empate (puedes manejar empates luego)
+  return winner;
 }
 
 export function checkWinCondition(players) {
@@ -25,6 +25,6 @@ export function checkWinCondition(players) {
   const impostors = active.filter(p => p.isImpostor);
   const citizens = active.filter(p => !p.isImpostor);
   if (impostors.length === 0) return "citizens";
-  if (impostors.length >= citizens.length) return "impostors";
+  if (impostors.length > citizens.length) return "impostors"; // > no >=
   return null;
 }

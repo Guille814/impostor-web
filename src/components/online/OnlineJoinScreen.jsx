@@ -1,30 +1,57 @@
 import { useState, useEffect } from "react";
-import { joinGame, leaveGame, listenToGame, addCustomWordToGame } from "../../utils/sessionUtils";
+import { joinGame, listenToGame, addCustomWordToGame, setPlayerReady, updateGameSettings } from "../../utils/sessionUtils";
 
-export default function OnlineJoinScreen({ code, onGameReady }) {
-  const [step, setStep] = useState("names"); // names | words | waiting
-  const [multiPlayer, setMultiPlayer] = useState(false);
-  const [extraCount, setExtraCount] = useState(1);
-  const [names, setNames] = useState([""]);
-  const [playerId] = useState(() => Math.random().toString(36).substring(2));
+export default function OnlineJoinScreen({ code, onGameStart, user, userWords = [] }) {
+  // Persistir nombres y playerId en sessionStorage para sobrevivir reloads
+  const [playerId] = useState(() => {
+    const saved = sessionStorage.getItem(`pid-${code}`);
+    if (saved) return saved;
+    const newId = Math.random().toString(36).substring(2);
+    sessionStorage.setItem(`pid-${code}`, newId);
+    return newId;
+  });
+
+  const [savedNames] = useState(() => {
+    const saved = sessionStorage.getItem(`names-${code}`);
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const [step, setStep] = useState(() => savedNames ? "words" : "names");
+  const [multiPlayer, setMultiPlayer] = useState(() => savedNames ? savedNames.length > 1 : false);
+  const [names, setNames] = useState(() => savedNames || [""]);
+  const [joined, setJoined] = useState(!!savedNames);
   const [word, setWord] = useState("");
   const [hint, setHint] = useState("");
   const [category, setCategory] = useState("");
   const [addedWords, setAddedWords] = useState([]);
-  const [game, setGame] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importDone, setImportDone] = useState(false);
 
   useEffect(() => {
-    const unsub = listenToGame(code, (g) => {
-      setGame(g);
-      if (g?.status === "cards") onGameReady(code, playerId);
+    const unsub = listenToGame(code, g => {
+      if (!g) return;
+      if (g.status === "cards" && joined) onGameStart(playerId);
+      if (g.status === "lobby" && joined) {
+        setStep("words");
+      }
     });
     return () => unsub();
-  }, [code]);
+  }, [code, joined]);
+
+  // Si ya estaba unido antes (savedNames), re-unirse con los mismos nombres
+  useEffect(() => {
+    if (savedNames && !joined) {
+      joinGame(code, playerId, savedNames).then(() => setJoined(true));
+    }
+  }, []);
 
   const handleJoin = async () => {
     const finalNames = names.filter(n => n.trim());
     if (!finalNames.length) return;
     await joinGame(code, playerId, finalNames);
+    sessionStorage.setItem(`names-${code}`, JSON.stringify(finalNames));
+    sessionStorage.setItem(`pid-${code}`, playerId);
+    setJoined(true);
     setStep("words");
   };
 
@@ -35,10 +62,31 @@ export default function OnlineJoinScreen({ code, onGameReady }) {
     setWord(""); setHint(""); setCategory("");
   };
 
-  const updateNames = (count) => {
+  const handleImportWords = async () => {
+    setImporting(true);
+    for (const w of userWords) {
+      await addCustomWordToGame(code, playerId, w.word, w.hint, w.category);
+    }
+    setImporting(false);
+    setImportDone(true);
+  };
+
+  const handleReady = async () => {
+    await setPlayerReady(code, playerId, true);
+    setStep("waiting");
+  };
+
+  const handleEditNames = () => {
+    sessionStorage.removeItem(`names-${code}`);
+    setJoined(false);
+    setStep("names");
+  };
+
+  const updateNames = count => {
     setNames(Array.from({ length: count }, (_, i) => names[i] || ""));
   };
 
+  // ── Nombres ──
   if (step === "names") return (
     <div className="screen words-screen">
       <div className="words-topbar">
@@ -51,39 +99,34 @@ export default function OnlineJoinScreen({ code, onGameReady }) {
           <span className="join-icon">🎮</span>
           <p>¿Juegas solo o por más jugadores?</p>
         </div>
-
         <div className="cat-toggle-row">
-          <button className={`cat-mode-btn ${!multiPlayer ? "active" : ""}`} onClick={() => { setMultiPlayer(false); setNames([""]); }}>Solo yo</button>
-          <button className={`cat-mode-btn ${multiPlayer ? "active" : ""}`} onClick={() => { setMultiPlayer(true); updateNames(2); }}>Por varios</button>
+          <button className={`cat-mode-btn ${!multiPlayer ? "active" : ""}`}
+            onClick={() => { setMultiPlayer(false); setNames([""]); }}>Solo yo</button>
+          <button className={`cat-mode-btn ${multiPlayer ? "active" : ""}`}
+            onClick={() => { setMultiPlayer(true); updateNames(2); }}>Por varios</button>
         </div>
-
         {multiPlayer && (
-          <div className="section" style={{ background: "var(--surface2)", borderRadius: 12, border: "1.5px solid var(--border)", padding: "14px 16px" }}>
+          <div style={{ background: "var(--surface2)", borderRadius: 12, border: "1.5px solid var(--border)", padding: "14px 16px" }}>
             <label className="form-label">¿Por cuántos jugadores?</label>
             <div className="counter-row" style={{ marginTop: 8 }}>
-              <button className="counter-btn" onClick={() => { const n = Math.max(2, names.length - 1); updateNames(n); }}>−</button>
+              <button className="counter-btn" onClick={() => updateNames(Math.max(2, names.length - 1))}>−</button>
               <span className="counter-val">{names.length}</span>
-              <button className="counter-btn" onClick={() => { const n = Math.min(6, names.length + 1); updateNames(n); }}>+</button>
+              <button className="counter-btn" onClick={() => updateNames(Math.min(6, names.length + 1))}>+</button>
             </div>
           </div>
         )}
-
         <div className="word-form">
           {names.map((name, i) => (
             <div key={i} className="form-field">
               <label className="form-label">{multiPlayer ? `Jugador ${i + 1}` : "Tu nombre"}</label>
-              <input className="form-input" placeholder={`Jugador ${i + 1}`} value={name}
+              <input className="form-input" placeholder={`Nombre ${i + 1}`} value={name}
                 onChange={e => { const arr = [...names]; arr[i] = e.target.value; setNames(arr); }} maxLength={20} />
             </div>
           ))}
         </div>
-
         <div className="start-sticky">
-          <button
-            className={`start-btn ${!names.every(n => n.trim()) ? "disabled" : ""}`}
-            disabled={!names.every(n => n.trim())}
-            onClick={handleJoin}
-          >
+          <button className={`start-btn ${!names.every(n => n.trim()) ? "disabled" : ""}`}
+            disabled={!names.every(n => n.trim())} onClick={handleJoin}>
             ✅ Confirmar nombre{names.length > 1 ? "s" : ""}
           </button>
         </div>
@@ -91,18 +134,49 @@ export default function OnlineJoinScreen({ code, onGameReady }) {
     </div>
   );
 
+  // ── Palabras / Lobby ──
   if (step === "words") return (
     <div className="screen words-screen">
       <div className="words-topbar">
         <div />
-        <h2 className="words-title">Añadir palabras</h2>
+        <h2 className="words-title">Preparación</h2>
         <div style={{ width: 60 }} />
       </div>
       <div className="words-content">
+
+        {/* Info jugadores de este dispositivo */}
+        <div className="session-code-block" style={{ background: "var(--surface2)" }}>
+          <span className="session-code-label">TUS JUGADORES</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+            {names.filter(n => n.trim()).map((n, i) => (
+              <span key={i} className="citizen-chip" style={{ fontSize: "1rem" }}>{n}</span>
+            ))}
+          </div>
+          <button className="back-btn" style={{ marginTop: 4 }} onClick={handleEditNames}>
+            ✏️ Editar nombres / añadir jugador
+          </button>
+        </div>
+
         <div className="join-header">
           <span className="join-icon">📝</span>
-          <p>Añade palabras secretas para la partida.<br />Solo tú y el host las veis.</p>
+          <p>Opcional — añade palabras para la partida</p>
         </div>
+
+        {/* Importar */}
+        {user && userWords.length > 0 && !importDone && (
+          <div className="session-code-block" style={{ border: "1.5px solid rgba(76,201,240,0.2)", background: "rgba(76,201,240,0.04)" }}>
+            <span className="session-code-label">TUS PALABRAS GUARDADAS</span>
+            <p style={{ color: "var(--muted)", fontSize: "0.85rem", textAlign: "center" }}>
+              {userWords.length} palabra{userWords.length !== 1 ? "s" : ""} en tu cuenta
+            </p>
+            <button className="modal-btn"
+              style={{ background: "rgba(76,201,240,0.1)", color: "var(--citizen)", border: "1.5px solid rgba(76,201,240,0.3)" }}
+              onClick={handleImportWords} disabled={importing}>
+              {importing ? "Importando…" : `📥 Importar mis ${userWords.length} palabras`}
+            </button>
+          </div>
+        )}
+        {importDone && <div className="join-success">✓ Palabras importadas</div>}
 
         {addedWords.length > 0 && (
           <div className="words-list">
@@ -133,17 +207,14 @@ export default function OnlineJoinScreen({ code, onGameReady }) {
             <label className="form-label">Categoría</label>
             <input className="form-input" placeholder="Ej: Animales" value={category} onChange={e => setCategory(e.target.value)} maxLength={30} />
           </div>
-          <button
-            className={`modal-btn ${(!word.trim() || !hint.trim() || !category.trim()) ? "secondary" : ""}`}
-            onClick={handleAddWord}
-            disabled={!word.trim() || !hint.trim() || !category.trim()}
-          >
+          <button className={`modal-btn ${(!word.trim() || !hint.trim() || !category.trim()) ? "secondary" : ""}`}
+            onClick={handleAddWord} disabled={!word.trim() || !hint.trim() || !category.trim()}>
             + Añadir palabra
           </button>
         </div>
 
         <div className="start-sticky">
-          <button className="start-btn" onClick={() => setStep("waiting")}>
+          <button className="start-btn" onClick={handleReady}>
             ✅ Listo, esperar al host
           </button>
         </div>
@@ -151,6 +222,7 @@ export default function OnlineJoinScreen({ code, onGameReady }) {
     </div>
   );
 
+  // ── Esperando ──
   return (
     <div className="screen menu-screen">
       <div className="menu-card" style={{ textAlign: "center", gap: 20 }}>
@@ -158,13 +230,17 @@ export default function OnlineJoinScreen({ code, onGameReady }) {
         <h2 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "1.8rem", letterSpacing: "0.1em" }}>
           Esperando al host…
         </h2>
-        <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-          La partida comenzará pronto
-        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+          {names.filter(n => n.trim()).map((n, i) => (
+            <span key={i} className="citizen-chip">{n}</span>
+          ))}
+        </div>
+        <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>La partida comenzará pronto</p>
         <div className="session-code-block">
           <span className="session-code-label">CÓDIGO</span>
           <span className="session-code" style={{ fontSize: "2.5rem" }}>{code}</span>
         </div>
+        <button className="back-btn" onClick={handleEditNames}>✏️ Editar nombres</button>
       </div>
     </div>
   );
