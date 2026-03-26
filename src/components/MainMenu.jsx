@@ -1,4 +1,4 @@
-export default function MainMenu({ onOffline, onWords, onSession, user, onLogin, onLogout }) {
+export default function MainMenu({ onOffline, onWords, onSession, onOnline, user, onLogin, onLogout }) {
   return (
     <div className="screen menu-screen">
 
@@ -32,13 +32,13 @@ export default function MainMenu({ onOffline, onWords, onSession, user, onLogin,
             </div>
             <span className="menu-btn-arrow">→</span>
           </button>
-          <button className="menu-btn disabled-btn" disabled>
+          <button className="menu-btn primary" onClick={onOnline}>
             <span className="menu-btn-icon">🌐</span>
             <div className="menu-btn-text">
               <span className="menu-btn-title">Modo Online</span>
-              <span className="menu-btn-sub">Próximamente…</span>
+              <span className="menu-btn-sub">Juega con amigos desde sus móviles</span>
             </div>
-            <span className="menu-btn-badge">Pronto</span>
+            <span className="menu-btn-arrow">→</span>
           </button>
           <button className="menu-btn secondary" onClick={onSession}>
             <span className="menu-btn-icon">🔗</span>
