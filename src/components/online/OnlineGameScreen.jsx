@@ -17,38 +17,28 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
     const [linkCopied, setLinkCopied] = useState(false);
     const [passPhoneTo, setPassPhoneTo] = useState(null);
 
-    const onGameStartCalled = useRef(false);
-
     useEffect(() => {
-        const unsub = listenToGame(code, g => {
-            if (!g) return;
-            setGameStatus(g.status);
-            // Llamar directamente aquí sin depender de estado
-            if (g.status === "cards" && joined && !onGameStartCalled.current) {
-                onGameStartCalled.current = true;
-                onGameStart(playerId);
-            }
-            if (g.status === "lobby" && joined) setStep("words");
+        const u1 = listenToGame(code, g => {
+            setGame(g);
+            if (g?.status === "lobby") onReturnToLobby();
         });
-        return () => unsub();
-    }, [code, joined]);
+        const u2 = listenToPlayers(code, setPlayers);
+        const u3 = listenToVotes(code, setVotes);
+        return () => { u1(); u2(); u3(); };
+    }, [code]);
 
     useEffect(() => {
         if (game?.status === "voting") setMyVotes({});
     }, [game?.status]);
 
-    // Efecto de seguridad: si joined llega tarde
     useEffect(() => {
-        if (joined && gameStatus === "cards" && !onGameStartCalled.current) {
-            onGameStartCalled.current = true;
-            onGameStart(playerId);
-        }
-    }, [joined, gameStatus]);
+        if (game?.status === "cards") setCardsSeen(new Set());
+    }, [game?.word]);
+
     const me = players.find(p => p.id === playerId);
     const activePlayers = players.filter(p => !p.isEliminated);
     const totalVoters = activePlayers.reduce((sum, p) => sum + (p.names?.length || 1), 0);
     const allVoted = votes.length >= totalVoters && totalVoters > 0;
-    // Determinar si este nombre específico es impostor
     const myImpostorIndices = new Set(me?.impostorNameIndices || []);
     const isThisNameImpostor = me?.isImpostor && myImpostorIndices.has(showCard?.index);
 
@@ -77,7 +67,6 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
 
     if (!game) return <div className="screen menu-screen"><p style={{ color: "var(--muted)" }}>Cargando…</p></div>;
 
-    // ── TARJETAS ────────────────────────────────────────────────────
     if (game.status === "cards") {
         const myNames = me?.names || [];
         return (
@@ -162,35 +151,22 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
         );
     }
 
-    // ── VOTACIÓN ────────────────────────────────────────────────────
-    // ── VOTACIÓN ────────────────────────────────────────────────────
     if (game.status === "voting") {
         const myPlayer = players.find(p => p.id === playerId);
         const myAllNames = myPlayer?.names || [];
         const myActiveNames = myPlayer?.isEliminated ? [] : myAllNames;
-
         const myVoteKeys = myActiveNames.map((_, i) => `${playerId}-${i}`);
         const myVotesPlaced = votes.filter(v => myVoteKeys.includes(v.voterId));
         const allMineVoted = myActiveNames.length === 0 || myVotesPlaced.length >= myActiveNames.length;
-
         const nextVoterIndex = myActiveNames.findIndex((_, ni) => !myVotes[`${playerId}-${ni}`]);
         const currentVoterName = nextVoterIndex >= 0 ? myActiveNames[nextVoterIndex] : null;
 
-        // Construir lista de todos los nombres elegibles como targets
-        // Cada nombre individual de cada dispositivo activo, excepto el nombre
-        // del votante actual (nextVoterIndex del propio dispositivo)
         const allEligibleNames = [];
         for (const p of activePlayers) {
             p.names?.forEach((name, ni) => {
                 const isSelf = p.id === playerId && ni === nextVoterIndex;
                 if (!isSelf) {
-                    // Target único por nombre: "deviceId-name-nameIndex"
-                    allEligibleNames.push({
-                        deviceId: p.id,
-                        nameIndex: ni,
-                        name,
-                        voteTargetId: `${p.id}-name-${ni}`
-                    });
+                    allEligibleNames.push({ deviceId: p.id, nameIndex: ni, name, voteTargetId: `${p.id}-name-${ni}` });
                 }
             });
         }
@@ -203,31 +179,25 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
                 <div className="cards-header">
                     <h2>🗳️ Votación</h2>
                     <p>
-                        {allMineVoted
-                            ? "Habéis votado — esperando al resto"
-                            : myActiveNames.length > 1
-                                ? `Turno de votar: ${currentVoterName}`
-                                : "Vota a quién crees que es el impostor"}
+                        {allMineVoted ? "Habéis votado — esperando al resto"
+                            : myActiveNames.length > 1 ? `Turno de votar: ${currentVoterName}`
+                            : "Vota a quién crees que es el impostor"}
                     </p>
                     <div className="progress-bar">
                         <div className="progress-fill" style={{ width: `${(votes.length / Math.max(totalVoters, 1)) * 100}%` }} />
                     </div>
                     <span className="progress-text">{votes.length} / {totalVoters} votos totales</span>
                 </div>
-
                 {!allMineVoted ? (
                     <div className="cards-grid">
                         {allEligibleNames.map(({ deviceId, nameIndex, name, voteTargetId }) => (
-                            <div key={`${deviceId}-${nameIndex}`}
-                                className="player-card unseen"
+                            <div key={`${deviceId}-${nameIndex}`} className="player-card unseen"
                                 onClick={() => {
                                     if (nextVoterIndex === -1) return;
                                     const voteKey = `${playerId}-${nextVoterIndex}`;
                                     setMyVotes(prev => ({ ...prev, [voteKey]: voteTargetId }));
-                                    castVote(code, voteKey, voteTargetId); // voteTargetId = "deviceId-name-nameIndex"
-                                    const remaining = myActiveNames.findIndex(
-                                        (_, ni) => ni > nextVoterIndex && !myVotes[`${playerId}-${ni}`]
-                                    );
+                                    castVote(code, voteKey, voteTargetId);
+                                    const remaining = myActiveNames.findIndex((_, ni) => ni > nextVoterIndex && !myVotes[`${playerId}-${ni}`]);
                                     if (remaining !== -1) setPassPhoneTo(myActiveNames[remaining]);
                                 }}>
                                 <span className="card-eye">👤</span>
@@ -242,13 +212,11 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
                         <p style={{ fontSize: "0.8rem", color: "var(--muted)" }}>Esperando al resto…</p>
                     </div>
                 )}
-
                 {passPhoneTo && (
                     <div className="modal-overlay">
                         <div className="modal-card">
                             <div className="confirm-icon">📱</div>
-                            <p className="confirm-text">
-                                Pasa el móvil a<br />
+                            <p className="confirm-text">Pasa el móvil a<br />
                                 <strong style={{ color: "var(--citizen)", fontSize: "1.2rem" }}>{passPhoneTo}</strong>
                             </p>
                             <button className="modal-btn" onClick={() => setPassPhoneTo(null)}>
@@ -261,13 +229,10 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
         );
     }
 
-    // ── RESULTADO VOTO ──────────────────────────────────────────────
     if (game.status === "vote_result") {
         const wasImpostor = game.lastEliminatedWasImpostor;
         const eliminatedDisplayName = game.lastEliminatedName || "Jugador";
-        const remainingImpostors = activePlayers.filter(
-            p => p.isImpostor && p.id !== game.lastEliminated
-        ).length;
+        const remainingImpostors = activePlayers.filter(p => p.isImpostor && p.id !== game.lastEliminated).length;
 
         return (
             <div className="screen reveal-screen">
@@ -283,7 +248,6 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
                             {wasImpostor ? "IMPOSTOR" : "CIUDADANO"}
                         </span>
                     </div>
-
                     {game.winner ? (
                         <>
                             <div className="reveal-divider" />
@@ -292,19 +256,13 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
                                 <span className="reveal-big-word">{game.word}</span>
                                 <span className="reveal-category-badge">{game.category}</span>
                             </div>
-                            <div className="impostor-reveal-row"
-                                style={{ borderColor: game.winner === "citizens" ? "rgba(46,196,182,0.3)" : "rgba(230,57,70,0.3)" }}>
-                                <span className="impostor-reveal-name"
-                                    style={{ color: game.winner === "citizens" ? "var(--green)" : "var(--accent)", fontSize: "1.4rem" }}>
+                            <div className="impostor-reveal-row" style={{ borderColor: game.winner === "citizens" ? "rgba(46,196,182,0.3)" : "rgba(230,57,70,0.3)" }}>
+                                <span className="impostor-reveal-name" style={{ color: game.winner === "citizens" ? "var(--green)" : "var(--accent)", fontSize: "1.4rem" }}>
                                     {game.winner === "citizens" ? "🏆 Ganan los ciudadanos" : "👹 Ganan los impostores"}
                                 </span>
                             </div>
                             <InviteButton />
-                            {isHost && (
-                                <button className="start-btn" onClick={() => returnToLobby(code)}>
-                                    🔄 Volver al lobby
-                                </button>
-                            )}
+                            {isHost && <button className="start-btn" onClick={() => returnToLobby(code)}>🔄 Volver al lobby</button>}
                             {!isHost && <p style={{ color: "var(--muted)", textAlign: "center", fontSize: "0.9rem" }}>Esperando al host…</p>}
                         </>
                     ) : (
@@ -316,8 +274,7 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
                             {isHost && (
                                 <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
                                     <button className="start-btn" onClick={() => startVoting(code)}>🗳️ Nueva votación</button>
-                                    <button className="back-btn" style={{ textAlign: "center" }}
-                                        onClick={() => continueAfterVote(code)}>← Volver a tarjetas</button>
+                                    <button className="back-btn" style={{ textAlign: "center" }} onClick={() => continueAfterVote(code)}>← Volver a tarjetas</button>
                                 </div>
                             )}
                             {!isHost && <p style={{ color: "var(--muted)", textAlign: "center", fontSize: "0.9rem" }}>Esperando al host…</p>}
@@ -328,7 +285,6 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
         );
     }
 
-    // ── FIN ─────────────────────────────────────────────────────────
     if (game.status === "finished") {
         return (
             <div className="screen reveal-screen">
@@ -342,19 +298,13 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
                         <span className="reveal-big-word">{game.word}</span>
                         <span className="reveal-category-badge">{game.category}</span>
                     </div>
-                    <div className="impostor-reveal-row"
-                        style={{ borderColor: game.winner === "citizens" ? "rgba(46,196,182,0.3)" : "rgba(230,57,70,0.3)" }}>
-                        <span className="impostor-reveal-name"
-                            style={{ color: game.winner === "citizens" ? "var(--green)" : "var(--accent)", fontSize: "1.4rem" }}>
+                    <div className="impostor-reveal-row" style={{ borderColor: game.winner === "citizens" ? "rgba(46,196,182,0.3)" : "rgba(230,57,70,0.3)" }}>
+                        <span className="impostor-reveal-name" style={{ color: game.winner === "citizens" ? "var(--green)" : "var(--accent)", fontSize: "1.4rem" }}>
                             {game.winner === "citizens" ? "🏆 Ganan los ciudadanos" : "👹 Ganan los impostores"}
                         </span>
                     </div>
                     <InviteButton />
-                    {isHost && (
-                        <button className="start-btn" onClick={() => returnToLobby(code)}>
-                            🔄 Volver al lobby
-                        </button>
-                    )}
+                    {isHost && <button className="start-btn" onClick={() => returnToLobby(code)}>🔄 Volver al lobby</button>}
                     {!isHost && <p style={{ color: "var(--muted)", textAlign: "center", fontSize: "0.9rem" }}>Esperando al host…</p>}
                 </div>
             </div>

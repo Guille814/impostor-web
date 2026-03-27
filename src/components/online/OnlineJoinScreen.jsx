@@ -1,8 +1,7 @@
-import { joinGame, listenToGame, addCustomWordToGame, setPlayerReady, updateGameSettings } from "../../utils/sessionUtils";
 import { useState, useEffect, useRef } from "react";
+import { joinGame, listenToGame, addCustomWordToGame, setPlayerReady } from "../../utils/sessionUtils";
 
 export default function OnlineJoinScreen({ code, onGameStart, user, userWords = [] }) {
-  // Persistir nombres y playerId en sessionStorage para sobrevivir reloads
   const [playerId] = useState(() => {
     const saved = sessionStorage.getItem(`pid-${code}`);
     if (saved) return saved;
@@ -19,15 +18,22 @@ export default function OnlineJoinScreen({ code, onGameStart, user, userWords = 
   const [step, setStep] = useState(() => savedNames ? "words" : "names");
   const [multiPlayer, setMultiPlayer] = useState(() => savedNames ? savedNames.length > 1 : false);
   const [names, setNames] = useState(() => savedNames || [""]);
-  const [joined, setJoined] = useState(!!savedNames);
+  const [joined, setJoined] = useState(false); // siempre false al inicio, se setea tras re-unirse
   const [word, setWord] = useState("");
   const [hint, setHint] = useState("");
   const [category, setCategory] = useState("");
   const [addedWords, setAddedWords] = useState([]);
   const [importing, setImporting] = useState(false);
   const [importDone, setImportDone] = useState(false);
-const onGameStartCalled = useRef(false);
-const [gameStatus, setGameStatus] = useState(null);
+  const onGameStartCalled = useRef(false);
+  const [gameStatus, setGameStatus] = useState(null);
+
+  // Si ya tenía nombres guardados, re-unirse automáticamente
+  useEffect(() => {
+    if (savedNames) {
+      joinGame(code, playerId, savedNames).then(() => setJoined(true));
+    }
+  }, []);
 
   useEffect(() => {
     const unsub = listenToGame(code, g => {
@@ -37,11 +43,15 @@ const [gameStatus, setGameStatus] = useState(null);
         onGameStartCalled.current = true;
         onGameStart(playerId);
       }
-      if (g.status === "lobby" && joined) setStep("words");
+      if (g.status === "lobby" && joined) {
+        setStep("words");
+        onGameStartCalled.current = false;
+      }
     });
     return () => unsub();
   }, [code, joined]);
 
+  // Seguridad: si joined llega después de que el juego ya esté en cards
   useEffect(() => {
     if (joined && gameStatus === "cards" && !onGameStartCalled.current) {
       onGameStartCalled.current = true;
@@ -90,13 +100,10 @@ const [gameStatus, setGameStatus] = useState(null);
     setNames(Array.from({ length: count }, (_, i) => names[i] || ""));
   };
 
-  // ── Nombres ──
   if (step === "names") return (
     <div className="screen words-screen">
       <div className="words-topbar">
-        <div />
-        <h2 className="words-title">Unirse — {code}</h2>
-        <div style={{ width: 60 }} />
+        <div /><h2 className="words-title">Unirse — {code}</h2><div style={{ width: 60 }} />
       </div>
       <div className="words-content">
         <div className="join-header">
@@ -138,17 +145,12 @@ const [gameStatus, setGameStatus] = useState(null);
     </div>
   );
 
-  // ── Palabras / Lobby ──
   if (step === "words") return (
     <div className="screen words-screen">
       <div className="words-topbar">
-        <div />
-        <h2 className="words-title">Preparación</h2>
-        <div style={{ width: 60 }} />
+        <div /><h2 className="words-title">Preparación</h2><div style={{ width: 60 }} />
       </div>
       <div className="words-content">
-
-        {/* Info jugadores de este dispositivo */}
         <div className="session-code-block" style={{ background: "var(--surface2)" }}>
           <span className="session-code-label">TUS JUGADORES</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
@@ -160,13 +162,10 @@ const [gameStatus, setGameStatus] = useState(null);
             ✏️ Editar nombres / añadir jugador
           </button>
         </div>
-
         <div className="join-header">
           <span className="join-icon">📝</span>
           <p>Opcional — añade palabras para la partida</p>
         </div>
-
-        {/* Importar */}
         {user && userWords.length > 0 && !importDone && (
           <div className="session-code-block" style={{ border: "1.5px solid rgba(76,201,240,0.2)", background: "rgba(76,201,240,0.04)" }}>
             <span className="session-code-label">TUS PALABRAS GUARDADAS</span>
@@ -181,7 +180,6 @@ const [gameStatus, setGameStatus] = useState(null);
           </div>
         )}
         {importDone && <div className="join-success">✓ Palabras importadas</div>}
-
         {addedWords.length > 0 && (
           <div className="words-list">
             {addedWords.map((w, i) => (
@@ -197,7 +195,6 @@ const [gameStatus, setGameStatus] = useState(null);
             ))}
           </div>
         )}
-
         <div className="word-form">
           <div className="form-field">
             <label className="form-label">Palabra</label>
@@ -216,17 +213,13 @@ const [gameStatus, setGameStatus] = useState(null);
             + Añadir palabra
           </button>
         </div>
-
         <div className="start-sticky">
-          <button className="start-btn" onClick={handleReady}>
-            ✅ Listo, esperar al host
-          </button>
+          <button className="start-btn" onClick={handleReady}>✅ Listo, esperar al host</button>
         </div>
       </div>
     </div>
   );
 
-  // ── Esperando ──
   return (
     <div className="screen menu-screen">
       <div className="menu-card" style={{ textAlign: "center", gap: 20 }}>
