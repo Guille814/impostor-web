@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
 import { joinGame, listenToGame, addCustomWordToGame, setPlayerReady, updateGameSettings } from "../../utils/sessionUtils";
+import { useState, useEffect, useRef } from "react";
 
 export default function OnlineJoinScreen({ code, onGameStart, user, userWords = [] }) {
   // Persistir nombres y playerId en sessionStorage para sobrevivir reloads
@@ -26,21 +26,25 @@ export default function OnlineJoinScreen({ code, onGameStart, user, userWords = 
   const [addedWords, setAddedWords] = useState([]);
   const [importing, setImporting] = useState(false);
   const [importDone, setImportDone] = useState(false);
-
-  const [gameStatus, setGameStatus] = useState(null);
+const onGameStartCalled = useRef(false);
+const [gameStatus, setGameStatus] = useState(null);
 
   useEffect(() => {
     const unsub = listenToGame(code, g => {
       if (!g) return;
       setGameStatus(g.status);
+      if (g.status === "cards" && joined && !onGameStartCalled.current) {
+        onGameStartCalled.current = true;
+        onGameStart(playerId);
+      }
       if (g.status === "lobby" && joined) setStep("words");
     });
     return () => unsub();
   }, [code, joined]);
 
-  // Efecto separado: reaccionar cuando joined Y gameStatus cambian
   useEffect(() => {
-    if (joined && gameStatus === "cards") {
+    if (joined && gameStatus === "cards" && !onGameStartCalled.current) {
+      onGameStartCalled.current = true;
       onGameStart(playerId);
     }
   }, [joined, gameStatus]);

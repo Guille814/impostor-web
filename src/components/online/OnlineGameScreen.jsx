@@ -17,24 +17,33 @@ export default function OnlineGameScreen({ code, playerId, isHost, wordBank, onR
     const [linkCopied, setLinkCopied] = useState(false);
     const [passPhoneTo, setPassPhoneTo] = useState(null);
 
+    const onGameStartCalled = useRef(false);
+
     useEffect(() => {
-        const u1 = listenToGame(code, g => {
-            setGame(g);
-            if (g?.status === "lobby") onReturnToLobby();
+        const unsub = listenToGame(code, g => {
+            if (!g) return;
+            setGameStatus(g.status);
+            // Llamar directamente aquí sin depender de estado
+            if (g.status === "cards" && joined && !onGameStartCalled.current) {
+                onGameStartCalled.current = true;
+                onGameStart(playerId);
+            }
+            if (g.status === "lobby" && joined) setStep("words");
         });
-        const u2 = listenToPlayers(code, setPlayers);
-        const u3 = listenToVotes(code, setVotes);
-        return () => { u1(); u2(); u3(); };
-    }, [code]);
+        return () => unsub();
+    }, [code, joined]);
 
     useEffect(() => {
         if (game?.status === "voting") setMyVotes({});
     }, [game?.status]);
 
+    // Efecto de seguridad: si joined llega tarde
     useEffect(() => {
-        if (game?.status === "cards") setCardsSeen(new Set());
-    }, [game?.word]);
-
+        if (joined && gameStatus === "cards" && !onGameStartCalled.current) {
+            onGameStartCalled.current = true;
+            onGameStart(playerId);
+        }
+    }, [joined, gameStatus]);
     const me = players.find(p => p.id === playerId);
     const activePlayers = players.filter(p => !p.isEliminated);
     const totalVoters = activePlayers.reduce((sum, p) => sum + (p.names?.length || 1), 0);

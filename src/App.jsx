@@ -60,8 +60,10 @@ export default function App() {
           setOnlineGameCode(code);
           setOnlinePlayerId(pid);
           setIsHost(false);
-          setScreen("online-game");
-          window.history.pushState({}, "", "/");
+          // En móvil pushState puede fallar silenciosamente, usar replace
+          window.history.replaceState({}, "", "/");
+          // Forzar el cambio de pantalla en el siguiente tick
+          setTimeout(() => setScreen("online-game"), 0);
         }}
       />
     );
