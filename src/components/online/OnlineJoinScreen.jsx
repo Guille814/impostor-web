@@ -27,23 +27,23 @@ export default function OnlineJoinScreen({ code, onGameStart, user, userWords = 
   const [importing, setImporting] = useState(false);
   const [importDone, setImportDone] = useState(false);
 
+  const [gameStatus, setGameStatus] = useState(null);
+
   useEffect(() => {
     const unsub = listenToGame(code, g => {
       if (!g) return;
-      if (g.status === "cards" && joined) onGameStart(playerId);
-      if (g.status === "lobby" && joined) {
-        setStep("words");
-      }
+      setGameStatus(g.status);
+      if (g.status === "lobby" && joined) setStep("words");
     });
     return () => unsub();
   }, [code, joined]);
 
-  // Si ya estaba unido antes (savedNames), re-unirse con los mismos nombres
+  // Efecto separado: reaccionar cuando joined Y gameStatus cambian
   useEffect(() => {
-    if (savedNames && !joined) {
-      joinGame(code, playerId, savedNames).then(() => setJoined(true));
+    if (joined && gameStatus === "cards") {
+      onGameStart(playerId);
     }
-  }, []);
+  }, [joined, gameStatus]);
 
   const handleJoin = async () => {
     const finalNames = names.filter(n => n.trim());
